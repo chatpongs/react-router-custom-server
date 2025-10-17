@@ -6,12 +6,21 @@
     "build": "react-router build",
     "dev": "react-router dev",
     "start": "react-router-serve ./build/server/index.js",
+    "start:express": "bun run build && bun run server.ts",
+    "server": "bun run server.ts",
     "typecheck": "react-router typegen && tsc"
   },
   "dependencies": {
     "@react-router/node": "^7.9.2",
     "@react-router/serve": "^7.9.2",
+    "@types/compression": "^1.8.1",
+    "@types/express": "^5.0.3",
+    "@types/morgan": "^1.9.10",
+    "compression": "^1.8.1",
+    "express": "^5.1.0",
+    "helmet": "^8.1.0",
     "isbot": "^5.1.31",
+    "morgan": "^1.10.1",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "react-router": "^7.9.2"
