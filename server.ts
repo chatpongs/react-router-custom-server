@@ -53,10 +53,68 @@ app.use(async (req, res, next) => {
     const entryModule = build.entry?.module || build;
     const handleRequest = entryModule.default || entryModule;
 
-    // Create mock router context and headers for the handler
+    // Create proper router context with manifest and routes from build
     const responseStatusCode = 200;
     const responseHeaders = new Headers();
-    const routerContext = {};
+    
+    // Build the EntryContext with proper manifest structure
+    // Ensure routeModules are properly mapped from the build
+    const routes = build.routes || {};
+    const routeModules: Record<string, any> = {};
+    
+    // Map each route ID to its module
+    Object.keys(routes).forEach((routeId) => {
+      const routeData = routes[routeId];
+      if (routeData && routeData.module) {
+        routeModules[routeId] = routeData.module;
+      }
+    });
+    
+    // Build matches array from routes
+    const pathname = url.pathname;
+    const matches: any[] = [];
+    
+    // Find matching routes for the current path
+    Object.keys(routes).forEach((routeId) => {
+      const route = routes[routeId];
+      if (route) {
+        matches.push({
+          params: {},
+          pathname: pathname,
+          pathnameBase: pathname,
+          route: {
+            id: routeId,
+            path: route.path,
+            ...route,
+          },
+        });
+      }
+    });
+    
+    const routerContext = {
+      manifest: {
+        routes: routes,
+        entry: build.entry || { module: entryModule },
+        url: build.url,
+        version: build.version,
+      },
+      routeModules: routeModules,
+      staticHandlerContext: {
+        location: {
+          pathname: pathname,
+          search: url.search,
+          hash: url.hash,
+          state: null,
+          key: 'default',
+        },
+        loaderData: {},
+        actionData: null,
+        errors: null,
+        matches: matches,
+      },
+      isSpaMode: false,
+    };
+    
     const loadContext = {};
 
     // Call the entry.server handler
