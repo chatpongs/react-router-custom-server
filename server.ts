@@ -56,6 +56,8 @@ app.use(async (req, res, next) => {
     // Create proper router context with manifest and routes from build
     const responseStatusCode = 200;
     const responseHeaders = new Headers();
+    responseHeaders.append("Content-Type", "text/html; charset=utf-8");
+    // responseHeaders.append("Content-Encoding", "br");
     
     // Build the EntryContext with proper manifest structure
     // Ensure routeModules are properly mapped from the build

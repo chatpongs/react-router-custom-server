@@ -1,65 +1,73 @@
 import { PassThrough } from "node:stream";
-
-import type { AppLoadContext, EntryContext } from "react-router";
 import { createReadableStreamFromReadable } from "@react-router/node";
+import { renderToPipeableStream } from "react-dom/server";
 import { ServerRouter } from "react-router";
 import { isbot } from "isbot";
-import type { RenderToPipeableStreamOptions } from "react-dom/server";
-import { renderToPipeableStream } from "react-dom/server";
+import type { EntryContext } from "react-router";
 
-export const streamTimeout = 5_000;
+const ABORT_DELAY = 5_000;
 
 export default function handleRequest(
   request: Request,
   responseStatusCode: number,
   responseHeaders: Headers,
   routerContext: EntryContext,
-  loadContext: AppLoadContext,
-  // If you have middleware enabled:
-  // loadContext: RouterContextProvider
+  loadContext: unknown
 ) {
   return new Promise((resolve, reject) => {
     let shellRendered = false;
     let userAgent = request.headers.get("user-agent");
 
-    // Ensure requests from bots and SPA Mode renders wait for all content to load before responding
-    // https://react.dev/reference/react-dom/server/renderToPipeableStream#waiting-for-all-content-to-load-for-crawlers-and-static-generation
-    let readyOption: keyof RenderToPipeableStreamOptions =
+    // Determine rendering strategy
+    let readyOption: keyof NonNullable<Parameters<typeof renderToPipeableStream>[1]> =
       (userAgent && isbot(userAgent)) || routerContext.isSpaMode
         ? "onAllReady"
         : "onShellReady";
 
-    // Abort the rendering stream after the `streamTimeout` so it has time to
-    // flush down the rejected boundaries
-    let timeoutId: ReturnType<typeof setTimeout> | undefined = setTimeout(
-      () => abort(),
-      streamTimeout + 1000,
+    // Set security headers
+    responseHeaders.set(
+      "Content-Security-Policy",
+      "default-src 'self';style-src 'self' 'unsafe-inline';script-src 'self';img-src 'self' data:;base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';object-src 'none';script-src-attr 'none';upgrade-insecure-requests"
     );
+    responseHeaders.set("Cross-Origin-Opener-Policy", "same-origin");
+    responseHeaders.set("Cross-Origin-Resource-Policy", "same-origin");
+    responseHeaders.set("Referrer-Policy", "no-referrer");
+    responseHeaders.set("X-Content-Type-Options", "nosniff");
+    responseHeaders.set("X-DNS-Prefetch-Control", "off");
+    responseHeaders.set("X-Frame-Options", "SAMEORIGIN");
+    responseHeaders.set("X-XSS-Protection", "0");
+    responseHeaders.set("X-Download-Options", "noopen");
+    responseHeaders.set("X-Permitted-Cross-Domain-Policies", "none");
+    responseHeaders.set("Origin-Agent-Cluster", "?1");
+
+    // Remove compression-related headers that may cause WAF issues
+    // responseHeaders.delete("Vary");
+    // responseHeaders.delete("Content-Encoding");
+    // responseHeaders.delete("Content-Type");
+
+    // Set content length manually (helps with security scanners)
+    // responseHeaders.set("Content-Length", "299");
+
+    const timeoutId = setTimeout(() => {
+      reject(new Error("Response timeout"));
+    }, ABORT_DELAY);
 
     const { pipe, abort } = renderToPipeableStream(
       <ServerRouter context={routerContext} url={request.url} />,
       {
         [readyOption]() {
           shellRendered = true;
-          const body = new PassThrough({
-            final(callback) {
-              // Clear the timeout to prevent retaining the closure and memory leak
-              clearTimeout(timeoutId);
-              timeoutId = undefined;
-              callback();
-            },
-          });
+          const body = new PassThrough();
           const stream = createReadableStreamFromReadable(body);
 
           responseHeaders.set("Content-Type", "text/html");
 
           pipe(body);
-
           resolve(
             new Response(stream, {
               headers: responseHeaders,
               status: responseStatusCode,
-            }),
+            })
           );
         },
         onShellError(error: unknown) {
@@ -67,14 +75,16 @@ export default function handleRequest(
         },
         onError(error: unknown) {
           responseStatusCode = 500;
-          // Log streaming rendering errors from inside the shell.  Don't log
-          // errors encountered during initial shell rendering since they'll
-          // reject and get logged in handleDocumentRequest.
           if (shellRendered) {
             console.error(error);
           }
         },
-      },
+      }
     );
+
+    setTimeout(() => {
+      abort();
+      reject(new Error("Response aborted"));
+    }, ABORT_DELAY);
   });
 }
